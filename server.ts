@@ -111,8 +111,25 @@ Ensure the formatting (paragraphs, line breaks) is preserved. Do not add any ext
       
       res.json({ translatedText });
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error.message || '内部服务器错误' });
+      let errorMessage = error.message || '内部服务器错误';
+      
+      if (typeof errorMessage === 'string' && errorMessage.includes('"error":')) {
+        try {
+          const jsonStart = errorMessage.indexOf('{');
+          if (jsonStart !== -1) {
+            const parsed = JSON.parse(errorMessage.substring(jsonStart));
+            errorMessage = parsed.error?.message || errorMessage;
+          }
+        } catch (e) {}
+      }
+      
+      if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
+        errorMessage = '请求过于频繁或免费额度已耗尽 (Quota Exceeded)。请检查 API Key 额度或稍后再试。';
+      } else if (errorMessage.includes('API key not valid')) {
+        errorMessage = 'API 密钥无效 (Invalid API Key)。请在侧边栏中配置有效的 API Key。';
+      }
+      
+      res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -172,8 +189,25 @@ Ensure the formatting (paragraphs, line breaks) is preserved. Do not add any ext
         return res.status(400).json({ error: '不支持的模型提供商' });
       }
     } catch (error: any) {
-      console.error(error);
-      res.status(500).json({ error: error.message || '测试连接失败' });
+      let errorMessage = error.message || '测试连接失败';
+      
+      if (typeof errorMessage === 'string' && errorMessage.includes('"error":')) {
+        try {
+          const jsonStart = errorMessage.indexOf('{');
+          if (jsonStart !== -1) {
+            const parsed = JSON.parse(errorMessage.substring(jsonStart));
+            errorMessage = parsed.error?.message || errorMessage;
+          }
+        } catch (e) {}
+      }
+      
+      if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
+        errorMessage = '请求过于频繁或免费额度已耗尽 (Quota Exceeded)。请检查 API Key 额度或稍后再试。';
+      } else if (errorMessage.includes('API key not valid')) {
+        errorMessage = 'API 密钥无效 (Invalid API Key)。请在侧边栏中配置有效的 API Key。';
+      }
+      
+      res.status(500).json({ error: errorMessage });
     }
   });
 
