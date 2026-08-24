@@ -1,0 +1,199 @@
+import express from 'express';
+import path from 'path';
+import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  // Increase payload limit for images
+  app.use(express.json({ limit: '50mb' }));
+
+  app.post('/api/translate', async (req, res) => {
+    try {
+      const { text, targetLang, style, terminology, provider, model, apiKey, imageBase64, imageMimeType } = req.body;
+      
+      // Select API Key: custom or default
+      const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+      
+      if (!effectiveApiKey) {
+        return res.status(400).json({ error: '未提供或未配置 API Key' });
+      }
+      
+      let translatedText = '';
+      
+      if (provider === 'gemini') {
+        const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
+        
+        const systemInstruction = `You are a professional novel translator. Translate the given text into ${targetLang || 'Simplified Chinese'}.
+Style: ${style || 'Professional and fluent'}.
+Glossary/Terminology: ${terminology || 'None provided'}.
+Ensure the formatting (paragraphs, line breaks) is preserved. Do not add any extra conversational text.`;
+
+        const contents = [];
+        
+        if (imageBase64) {
+           contents.push({
+             role: 'user',
+             parts: [
+               { inlineData: { data: imageBase64, mimeType: imageMimeType } },
+               { text: `Extract all text from this image, preprocess and format it properly (maintaining novel chapter structure if any), and then translate it into ${targetLang || 'Simplified Chinese'}. Just provide the final translated text.` }
+             ]
+           });
+        } else {
+           contents.push({
+             role: 'user',
+             parts: [
+               { text: text }
+             ]
+           });
+        }
+
+        const targetModel = model || 'gemini-2.5-pro';
+        
+        const response = await ai.models.generateContent({
+            model: imageBase64 ? targetModel : targetModel,
+            contents,
+            config: {
+                systemInstruction,
+                temperature: 0.3,
+            }
+        });
+        
+        translatedText = response.text || '';
+        
+      } else if (provider === 'deepseek' || provider === 'openai') {
+        const isDeepseek = provider === 'deepseek';
+        let endpoint = 'https://api.deepseek.com/chat/completions';
+        
+        if (!isDeepseek) {
+          const customUrl = req.body.baseUrl || 'https://api.openai.com/v1';
+          endpoint = customUrl.endsWith('/chat/completions') ? customUrl : 
+                     customUrl.endsWith('/') ? `${customUrl}chat/completions` : 
+                     `${customUrl}/chat/completions`;
+        }
+        
+        const modelName = model || (isDeepseek ? 'deepseek-chat' : 'gpt-3.5-turbo');
+        
+        const prompt = `You are a professional novel translator. Translate the given text into ${targetLang || 'Simplified Chinese'}.
+Style: ${style || 'Professional and fluent'}.
+Glossary/Terminology: ${terminology || 'None provided'}.
+Ensure the formatting (paragraphs, line breaks) is preserved. Do not add any extra conversational text.\n\nText to translate:\n${text}`;
+        
+        if (imageBase64) {
+            return res.status(400).json({ error: `当前仅 Gemini 模型支持图片识别功能。请切换模型或上传纯文本。` });
+        }
+        
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${effectiveApiKey}`
+            },
+            body: JSON.stringify({
+                model: modelName,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3
+            })
+        });
+        
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error?.message || 'API 请求失败');
+        }
+        
+        const data = await response.json();
+        translatedText = data.choices[0].message.content;
+      } else {
+          return res.status(400).json({ error: '不支持的模型提供商' });
+      }
+      
+      res.json({ translatedText });
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || '内部服务器错误' });
+    }
+  });
+
+  app.post('/api/test-connection', async (req, res) => {
+    try {
+      const { provider, apiKey, baseUrl, model } = req.body;
+      const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+      
+      if (!effectiveApiKey) {
+        return res.status(400).json({ error: '未提供 API Key' });
+      }
+
+      if (provider === 'gemini') {
+        const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
+        const targetModel = model || 'gemini-2.5-flash';
+        
+        // Use a simple prompt to test
+        await ai.models.generateContent({
+          model: targetModel,
+          contents: 'Test',
+        });
+        
+        return res.json({ success: true });
+      } else if (provider === 'deepseek' || provider === 'openai') {
+        const isDeepseek = provider === 'deepseek';
+        let endpoint = 'https://api.deepseek.com/chat/completions';
+        
+        if (!isDeepseek) {
+          const customUrl = baseUrl || 'https://api.openai.com/v1';
+          endpoint = customUrl.endsWith('/chat/completions') ? customUrl : 
+                     customUrl.endsWith('/') ? `${customUrl}chat/completions` : 
+                     `${customUrl}/chat/completions`;
+        }
+        
+        const modelName = model || (isDeepseek ? 'deepseek-chat' : 'gpt-3.5-turbo');
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${effectiveApiKey}`
+            },
+            body: JSON.stringify({
+                model: modelName,
+                messages: [{ role: 'user', content: 'Test' }],
+                max_tokens: 5
+            })
+        });
+        
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error?.message || `API 请求失败: HTTP ${response.status}`);
+        }
+        
+        return res.json({ success: true });
+      } else {
+        return res.status(400).json({ error: '不支持的模型提供商' });
+      }
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || '测试连接失败' });
+    }
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*all', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

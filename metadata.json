@@ -1,0 +1,6 @@
+{
+  "name": "Novel Translator Pro",
+  "description": "Professional AI-powered novel translation tool with multi-model support and image recognition.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
