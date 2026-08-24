@@ -11,11 +11,14 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.provider !== 'gemini' && parsed.provider !== 'deepseek') {
+        if (parsed.provider !== 'gemini' && parsed.provider !== 'deepseek' && parsed.provider !== 'openai') {
           parsed.provider = 'gemini';
           parsed.model = 'gemini-3-flash-preview';
         }
         if (!parsed.baseUrls) parsed.baseUrls = {};
+        if (!parsed.apiKeys) parsed.apiKeys = { gemini: '', deepseek: '', openai: '' };
+        if (!parsed.apiKeys.openai) parsed.apiKeys.openai = '';
+        if (!parsed.baseUrls.openai) parsed.baseUrls.openai = 'https://api.openai.com/v1';
         return parsed;
       } catch (e) {}
     }
